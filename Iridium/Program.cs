@@ -1,4 +1,4 @@
-﻿using Iridium.Common.IO;
+using Iridium.Common.IO;
 using System;
 using System.Net;
 using System.Net.Sockets;
@@ -10,6 +10,7 @@ namespace Iridium
     {
         private const int HANDSHAKE_SIZE = 194;
         private const int COOKIE_SIZE = 20;
+        private const int PORT = 7777;
 
         private static Random _random;
         private static byte[] _cookie;
@@ -18,37 +19,47 @@ namespace Iridium
 
         private static void Main(string[] args)
         {
-            _random = new Random();
-            _cookie = new byte[COOKIE_SIZE];
-
-            _random.NextBytes(_cookie);
-
-            var local = new IPEndPoint(IPAddress.Any, 7777);
-
-            _server = new UdpClient(local);
-
-            var sender = new IPEndPoint(IPAddress.Any, 0);
-
-            while (true)
+            try
             {
-                var bytes    = _server.Receive(ref sender);
-                var lastByte = bytes[^1];
+                _random = new Random();
+                _cookie = new byte[COOKIE_SIZE];
 
-                if (lastByte != 0)
+                _random.NextBytes(_cookie);
+
+                var local = new IPEndPoint(IPAddress.Any, PORT);
+
+                _server = new UdpClient(local);
+
+                var sender = new IPEndPoint(IPAddress.Any, 0);
+                Logger.Info($"Listening on port: {PORT}");
+
+                while (true)
                 {
-                    var bitSize = (bytes.Length * 8) - 1;
+                    var bytes = _server.Receive(ref sender);
+                    var lastByte = bytes[^1];
 
-                    // Bit streaming, starts at the Least Significant Bit, and ends at the MSB.
-                    while (!((lastByte & 0x80) >= 1))
+                    if (lastByte != 0)
                     {
-                        lastByte *= 2;
-                        bitSize--;
+                        var bitSize = (bytes.Length * 8) - 1;
+
+                        // Bit streaming, starts at the Least Significant Bit, and ends at the MSB.
+                        while (!((lastByte & 0x80) >= 1))
+                        {
+                            lastByte *= 2;
+                            bitSize--;
+                        }
+
+                        var reader = new BitReader(bytes, bitSize);
+
+                        Received(reader, bytes, sender);
                     }
-
-                    var reader = new BitReader(bytes, bitSize);
-
-                    Received(reader, bytes, sender);
                 }
+            }
+            catch
+            {
+                Logger.Error("Error while starting server exiting...");
+                Console.ReadKey();
+                Environment.Exit(0);
             }
         }
 
@@ -130,18 +141,18 @@ namespace Iridium
                                             var endian  = reader.ReadByte();
                                             var version = reader.ReadUInt32();
 
-                                            Console.WriteLine("NMT_Hello received.");
-                                            Console.WriteLine($"Endian = {endian}");
-                                            Console.WriteLine($"Version = {version:X8}");
+                                            Logger.Info("NMT_Hello received.");
+                                            Logger.Info($"Endian = {endian}");
+                                            Logger.Info($"Version = {version:X8}");
                                         }
                                         break;
 
-                                    default: Console.WriteLine($"Unknown type ({type}) specified."); break;
+                                    default: Logger.Info($"Unknown type ({type}) specified."); break;
                                 }
                             }
                             break;
 
-                        default: Console.WriteLine($"Unknown channel type ({chType}) specified."); break;
+                        default: Logger.Info($"Unknown channel type ({chType}) specified."); break;
                     }
                 }
             }
@@ -158,7 +169,7 @@ namespace Iridium
 
             builder.Append("};");
 
-            Console.WriteLine(builder.ToString());
+            Logger.Info(builder.ToString());
         }
 
         private static bool ParseHandshake(BitReader reader, out bool secretId, out float timeStamp, out byte[] cookie)
